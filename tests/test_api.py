@@ -63,6 +63,35 @@ def test_pdf_endpoint_rejects_multiple_xml_with_identifier(
     assert body["error"]["details"] == {"count": 2}
 
 
+def test_render_pdf_endpoint_returns_base64_pdf(
+    client, rich_ubl_xml: bytes, caplog
+) -> None:
+    with caplog.at_level("INFO", logger="uvicorn.error"):
+        response = client.post(
+            "/v1/xml/render-pdf",
+            json={"content_base64": _b64(rich_ubl_xml), "filename": "source.invoice.xml"},
+        )
+    assert response.status_code == 200
+    body = response.json()
+    UUID(body["identifier"])
+    assert response.headers["X-Request-ID"] == body["identifier"]
+    assert body["classification"]["syntax"] == "UBL"
+    assert body["pdf"]["filename"] == "source.invoice.pdf"
+    pdf_bytes = base64.b64decode(body["pdf"]["content_base64"])
+    assert pdf_bytes.startswith(b"%PDF-")
+    assert body["pdf"]["size_bytes"] == len(pdf_bytes)
+    assert body["pdf"]["sha256"] == hashlib.sha256(pdf_bytes).hexdigest()
+    assert "xml_syntax=UBL" in caplog.text
+
+
+def test_render_pdf_endpoint_rejects_unknown_xml(client) -> None:
+    response = client.post(
+        "/v1/xml/render-pdf", json={"content_base64": _b64(b"<root />")}
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "unsupported_xml_syntax"
+
+
 def test_invalid_base64_uses_consistent_error_envelope(client) -> None:
     response = client.post(
         "/v1/xml/identify", json={"content_base64": "not base64***"}

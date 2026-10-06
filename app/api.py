@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import PurePath
 from typing import Any
 from uuid import uuid4
 
@@ -21,8 +22,10 @@ from app.models import (
     XmlClassification,
     XmlIdentifyResponse,
     XmlPayload,
+    XmlRenderPdfResponse,
     XmlSyntax,
 )
+from app.invoice_renderer import render_invoice_pdf
 from app.service import process_pdf
 from app.xml_identifier import identify_xml
 
@@ -87,6 +90,15 @@ def _file_payload(filename: str, media_type: str, content: bytes) -> FilePayload
         sha256=sha256_hex(content),
         content_base64=encode_base64(content),
     )
+
+
+def _rendered_pdf_filename(source_filename: str | None) -> str:
+    if not source_filename:
+        return "invoice.pdf"
+    normalized = source_filename.replace("\\", "/")
+    source_name = PurePath(normalized).name
+    stem = PurePath(source_name).stem
+    return f"{stem or 'invoice'}.pdf"
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -216,6 +228,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 _file_payload(item.filename, item.media_type, item.content)
                 for item in result.other_attachments
             ],
+        )
+
+    @app.post(
+        "/v1/xml/render-pdf",
+        response_model=XmlRenderPdfResponse,
+        responses=error_responses,
+        tags=["XML"],
+    )
+    async def render_xml_pdf_endpoint(
+        payload: Base64Request, request: Request
+    ) -> XmlRenderPdfResponse:
+        xml_bytes = decode_base64_strict(
+            payload.content_base64,
+            max_bytes=active_settings.max_xml_bytes,
+            kind="XML",
+        )
+        pdf_bytes, classification = render_invoice_pdf(xml_bytes)
+        _log_result(request, outcome="success", classification=classification)
+        return XmlRenderPdfResponse(
+            identifier=_identifier(request),
+            classification=classification,
+            pdf=_file_payload(
+                _rendered_pdf_filename(payload.filename),
+                "application/pdf",
+                pdf_bytes,
+            ),
         )
 
     return app

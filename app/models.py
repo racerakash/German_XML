@@ -63,6 +63,12 @@ class XmlIdentifyResponse(BaseModel):
     classification: XmlClassification
 
 
+class XmlRenderPdfResponse(BaseModel):
+    identifier: str
+    classification: XmlClassification
+    pdf: FilePayload
+
+
 class ErrorBody(BaseModel):
     code: str
     message: str

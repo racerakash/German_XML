@@ -68,6 +68,19 @@ def test_identifies_ubl_credit_note_with_arbitrary_prefix() -> None:
     assert result.standard is InvoiceStandard.EN16931
 
 
+@pytest.mark.parametrize(
+    "root_name",
+    ["Invoice", "CreditNote", "DebitNote", "SelfBilledInvoice", "SelfBilledCreditNote"],
+)
+def test_identifies_ubl_invoice_family_document_roots(root_name: str) -> None:
+    xml = (
+        f'<doc:{root_name} xmlns:doc="urn:oasis:names:specification:ubl:schema:xsd:{root_name}-2" />'
+    ).encode()
+    result = identify_xml(xml)
+    assert result.syntax is XmlSyntax.UBL
+    assert result.document_type == root_name
+
+
 def test_unknown_well_formed_xml_returns_unknown() -> None:
     result = identify_xml(b"  <root><value>1</value></root>")
     assert result.syntax is XmlSyntax.UNKNOWN

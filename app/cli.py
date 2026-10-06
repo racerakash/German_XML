@@ -9,6 +9,7 @@ from uuid import uuid4
 from app.config import Settings
 from app.encoding import sha256_hex
 from app.errors import ServiceError
+from app.invoice_renderer import render_invoice_pdf
 from app.service import PdfExtractionResult, process_pdf
 from app.xml_identifier import identify_xml
 
@@ -86,6 +87,12 @@ def build_parser() -> argparse.ArgumentParser:
     identify_parser = subparsers.add_parser("identify-xml", help="Identify an XML file")
     identify_parser.add_argument("xml_file", type=Path)
 
+    render_parser = subparsers.add_parser(
+        "render-pdf", help="Render CII or UBL XML as a readable PDF"
+    )
+    render_parser.add_argument("xml_file", type=Path)
+    render_parser.add_argument("--output", "-o", type=Path, required=True)
+
     extract_parser = subparsers.add_parser("extract", help="Extract one PDF")
     extract_parser.add_argument("pdf_file", type=Path)
     extract_parser.add_argument("--output", "-o", type=Path, required=True)
@@ -116,6 +123,26 @@ def main(argv: list[str] | None = None) -> int:
                 f"identifier={identifier} source={args.xml_file} "
                 f"syntax={classification.syntax.value} standard={classification.standard.value} "
                 f"profile={classification.profile or '-'} sha256={sha256_hex(content)}"
+            )
+            return 0
+
+        if args.command == "render-pdf":
+            content = args.xml_file.read_bytes()
+            if len(content) > settings.max_xml_bytes:
+                raise ServiceError(
+                    "payload_too_large",
+                    "XML exceeds the configured size limit",
+                    status_code=413,
+                    details={"max_bytes": settings.max_xml_bytes},
+                )
+            identifier = str(uuid4())
+            pdf_bytes, classification = render_invoice_pdf(content)
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_bytes(pdf_bytes)
+            print(
+                f"identifier={identifier} source={args.xml_file} "
+                f"syntax={classification.syntax.value} standard={classification.standard.value} "
+                f"profile={classification.profile or '-'} saved={args.output}"
             )
             return 0
 

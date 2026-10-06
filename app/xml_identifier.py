@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from io import BytesIO
-from xml.etree.ElementTree import ParseError
+from xml.etree.ElementTree import Element, ParseError
 
 from defusedxml import ElementTree as DefusedET
 from defusedxml.common import DefusedXmlException
@@ -13,7 +13,22 @@ from app.models import InvoiceStandard, XmlClassification, XmlSyntax
 
 UBL_INVOICE_NS = "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
 UBL_CREDIT_NOTE_NS = "urn:oasis:names:specification:ubl:schema:xsd:CreditNote-2"
+UBL_DEBIT_NOTE_NS = "urn:oasis:names:specification:ubl:schema:xsd:DebitNote-2"
+UBL_SELF_BILLED_INVOICE_NS = (
+    "urn:oasis:names:specification:ubl:schema:xsd:SelfBilledInvoice-2"
+)
+UBL_SELF_BILLED_CREDIT_NOTE_NS = (
+    "urn:oasis:names:specification:ubl:schema:xsd:SelfBilledCreditNote-2"
+)
 CII_NAMESPACE_MARKER = "urn:un:unece:uncefact:data:standard:CrossIndustryInvoice"
+
+UBL_DOCUMENT_NAMESPACES = {
+    "Invoice": UBL_INVOICE_NS,
+    "CreditNote": UBL_CREDIT_NOTE_NS,
+    "DebitNote": UBL_DEBIT_NOTE_NS,
+    "SelfBilledInvoice": UBL_SELF_BILLED_INVOICE_NS,
+    "SelfBilledCreditNote": UBL_SELF_BILLED_CREDIT_NOTE_NS,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,9 +153,9 @@ def _classify_standard(identifiers: list[str]) -> tuple[InvoiceStandard, str | N
     return InvoiceStandard.UNKNOWN, None, None, guideline
 
 
-def identify_xml(xml_bytes: bytes) -> XmlClassification:
+def parse_xml_root(xml_bytes: bytes) -> Element:
     try:
-        root = DefusedET.parse(BytesIO(xml_bytes)).getroot()
+        return DefusedET.parse(BytesIO(xml_bytes)).getroot()
     except DefusedXmlException as exc:
         raise ServiceError("unsafe_xml", "XML content uses a prohibited construct") from exc
     except (ParseError, ValueError, TypeError) as exc:
@@ -149,6 +164,8 @@ def identify_xml(xml_bytes: bytes) -> XmlClassification:
         # defusedxml raises dedicated exceptions for entities and DTD-based attacks.
         raise ServiceError("unsafe_xml", "XML content uses a prohibited construct") from exc
 
+
+def identify_xml_root(root: Element) -> XmlClassification:
     expanded = _expanded_name(str(root.tag))
     syntax = XmlSyntax.UNKNOWN
     document_type = expanded.local_name or "UNKNOWN"
@@ -158,12 +175,7 @@ def identify_xml(xml_bytes: bytes) -> XmlClassification:
         and CII_NAMESPACE_MARKER.lower() in expanded.namespace.lower()
     ):
         syntax = XmlSyntax.CII
-    elif (
-        expanded.local_name == "Invoice" and expanded.namespace == UBL_INVOICE_NS
-    ) or (
-        expanded.local_name == "CreditNote"
-        and expanded.namespace == UBL_CREDIT_NOTE_NS
-    ):
+    elif UBL_DOCUMENT_NAMESPACES.get(expanded.local_name) == expanded.namespace:
         syntax = XmlSyntax.UBL
 
     identifiers = _guideline_candidates(root, syntax)
@@ -184,3 +196,7 @@ def identify_xml(xml_bytes: bytes) -> XmlClassification:
         root_element=str(root.tag),
         guideline_identifier=guideline,
     )
+
+
+def identify_xml(xml_bytes: bytes) -> XmlClassification:
+    return identify_xml_root(parse_xml_root(xml_bytes))

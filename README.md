@@ -1,6 +1,6 @@
 # German E-Invoice Extractor
 
-A stateless FastAPI service and local CLI for extracting embedded XML and other attachments from PDFs, then identifying ZUGFeRD/Factur-X, XRechnung, EN 16931, CII, and UBL invoice documents.
+A stateless FastAPI service and local CLI for extracting embedded XML and other attachments from PDFs, identifying ZUGFeRD/Factur-X, XRechnung, EN 16931, CII, and UBL invoice documents, and rendering recognized XML as a readable PDF.
 
 The API always returns the original PDF unchanged. It does not persist uploaded data. Full XSD and Schematron compliance validation is intentionally out of scope.
 
@@ -72,12 +72,44 @@ curl -sS http://127.0.0.1:8000/v1/pdf/extract \
 
 Each API response includes the UUID in both `identifier` and the `X-Request-ID` response header. Console logs contain the UUID, endpoint, CII/UBL type, standard, profile, and outcome but never the supplied content.
 
+### Render XML as PDF
+
+`POST /v1/xml/render-pdf` uses the same strict-base64 JSON request:
+
+```json
+{
+  "content_base64": "PD94bWwgdmVyc2lvbj0iMS4wIj8+...",
+  "filename": "invoice.xml"
+}
+```
+
+The response includes the UUID, XML classification, and a base64 PDF with filename, MIME type, size, and SHA-256. The renderer creates an English A4 invoice with parties, references, delivery and payment details, line items, taxes, totals, and notes. A deterministic appendix includes XML scalar values and attributes not already displayed; binary objects are represented by filename/MIME metadata, decoded size, and SHA-256 instead of their base64 payload.
+
+PowerShell example:
+
+```powershell
+$bytes = [System.IO.File]::ReadAllBytes("C:\invoices\invoice.xml")
+$body = @{ content_base64 = [Convert]::ToBase64String($bytes); filename = "invoice.xml" } | ConvertTo-Json
+$response = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/v1/xml/render-pdf" -ContentType "application/json" -Body $body
+[System.IO.File]::WriteAllBytes("invoice.pdf", [Convert]::FromBase64String($response.pdf.content_base64))
+```
+
+Supported UBL roots are `Invoice`, `CreditNote`, `DebitNote`, `SelfBilledInvoice`, and `SelfBilledCreditNote`. CII `CrossIndustryInvoice` documents and UN/EDIFACT document type codes are rendered with appropriate headings, including commercial, corrected, prepayment, debit, credit, self-billed, partial, tax, hire, freight, and construction invoices. An unknown type code is still rendered and shown explicitly in the heading.
+
+The generated PDF is an informational visualization only. It is not PDF/A-3, does not embed the source XML, and must not be described as a conformant ZUGFeRD/Factur-X hybrid. The original XML remains the authoritative structured invoice.
+
 ## Local CLI
 
 Identify XML:
 
 ```bash
 invoice-extractor identify-xml path/to/invoice.xml
+```
+
+Render CII or UBL XML to PDF:
+
+```bash
+invoice-extractor render-pdf path/to/invoice.xml --output invoice.pdf
 ```
 
 Extract one PDF into a per-PDF output directory:
@@ -119,3 +151,11 @@ invoice-extractor batch path/to/extracted-package --output output --recursive
 ```
 
 This performs extraction and identification only; it is not full KoSIT, XSD, or Schematron validation.
+
+## Example output
+
+The repository includes `examples/sample-ubl-invoice.xml`. Render it locally with:
+
+```bash
+invoice-extractor render-pdf examples/sample-ubl-invoice.xml --output output/pdf/sample-ubl-invoice.pdf
+```
