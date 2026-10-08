@@ -35,6 +35,28 @@ def test_cli_identify_xml(tmp_path: Path, ubl_xml: bytes, capsys) -> None:
     assert "syntax=UBL" in capsys.readouterr().out
 
 
+def test_cli_checks_pdfa3_zugferd_and_lists_attachments(
+    tmp_path: Path, make_pdf, cii_xml: bytes, capsys
+) -> None:
+    source = tmp_path / "hybrid.pdf"
+    source.write_bytes(
+        make_pdf(
+            [("factur-x.xml", cii_xml), ("terms.txt", b"terms")],
+            pdfa_part="3",
+            relationships={"factur-x.xml": "Alternative"},
+        )
+    )
+
+    assert main(["check-pdf", str(source)]) == 0
+    output = capsys.readouterr().out
+    assert "identifier=" in output
+    assert "is_pdfa3_or_zugferd_with_xml=True" in output
+    assert "is_pdfa3=True" in output
+    assert "is_zugferd=True" in output
+    assert "attachment filename=factur-x.xml type=CII" in output
+    assert "attachment filename=terms.txt type=OTHER" in output
+
+
 def test_cli_batch_reports_failure_and_continues(
     tmp_path: Path, make_pdf, cii_xml: bytes, capsys
 ) -> None:

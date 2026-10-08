@@ -63,6 +63,54 @@ def test_pdf_endpoint_rejects_multiple_xml_with_identifier(
     assert body["error"]["details"] == {"count": 2}
 
 
+def test_pdf_check_endpoint_returns_flags_and_attachment_types(
+    client, make_pdf, cii_xml: bytes, caplog
+) -> None:
+    pdf = make_pdf(
+        [("factur-x.xml", cii_xml), ("readme.txt", b"terms")],
+        pdfa_part="3",
+        relationships={"factur-x.xml": "Alternative"},
+    )
+    with caplog.at_level("INFO", logger="uvicorn.error"):
+        response = client.post(
+            "/v1/pdf/check",
+            json={"content_base64": _b64(pdf), "filename": "hybrid.pdf"},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    UUID(body["identifier"])
+    assert response.headers["X-Request-ID"] == body["identifier"]
+    assert body["filename"] == "hybrid.pdf"
+    assert body["is_pdfa3_or_zugferd_with_xml"] is True
+    assert body["is_pdfa3"] is True
+    assert body["pdfa_part"] == "3"
+    assert body["pdfa_conformance"] == "B"
+    assert body["pdfa_detection"] == "XMP_METADATA_CLAIM"
+    assert body["has_xml_attachment"] is True
+    assert body["is_zugferd"] is True
+    assert [(item["filename"], item["attachment_type"]) for item in body["attachments"]] == [
+        ("factur-x.xml", "CII"),
+        ("readme.txt", "OTHER"),
+    ]
+    assert body["attachments"][0]["association_relationship"] == "Alternative"
+    assert "content_base64" not in body["attachments"][0]
+    assert "xml_syntax=CII" in caplog.text
+
+
+def test_pdf_check_endpoint_returns_false_for_plain_pdf(client, make_pdf) -> None:
+    response = client.post(
+        "/v1/pdf/check",
+        json={"content_base64": _b64(make_pdf([("notes.txt", b"hello")]))},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["is_pdfa3_or_zugferd_with_xml"] is False
+    assert body["is_pdfa3"] is False
+    assert body["has_xml_attachment"] is False
+    assert body["is_zugferd"] is False
+
+
 def test_render_pdf_endpoint_returns_base64_pdf(
     client, rich_ubl_xml: bytes, caplog
 ) -> None:

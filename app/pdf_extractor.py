@@ -16,6 +16,7 @@ class ExtractedAttachment:
     filename: str
     content: bytes
     media_type: str
+    association_relationship: str | None = None
 
 
 def _resolve(value: Any) -> Any:
@@ -79,6 +80,11 @@ def _attachment_from_filespec(value: Any, fallback_name: str) -> ExtractedAttach
         filename=filename,
         content=content,
         media_type=_media_type_from_stream(stream, filename),
+        association_relationship=(
+            str(filespec.get("/AFRelationship")).lstrip("/")
+            if filespec.get("/AFRelationship") is not None
+            else None
+        ),
     )
 
 

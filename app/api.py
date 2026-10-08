@@ -17,7 +17,8 @@ from app.models import (
     Base64Request,
     ErrorResponse,
     FilePayload,
-    InvoiceStandard,
+    PdfAttachmentCheck,
+    PdfCheckResponse,
     PdfExtractResponse,
     XmlClassification,
     XmlIdentifyResponse,
@@ -26,6 +27,7 @@ from app.models import (
     XmlSyntax,
 )
 from app.invoice_renderer import render_invoice_pdf
+from app.pdf_checker import check_pdf
 from app.service import process_pdf
 from app.xml_identifier import identify_xml
 
@@ -106,7 +108,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(
         title="German E-Invoice Extractor API",
         version=__version__,
-        description="Extract and identify ZUGFeRD, Factur-X, and XRechnung XML.",
+        description=(
+            "Extract, identify, check, and render ZUGFeRD, Factur-X, "
+            "XRechnung, CII, and UBL invoice documents."
+        ),
     )
     app.state.settings = active_settings
 
@@ -227,6 +232,58 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             attachments=[
                 _file_payload(item.filename, item.media_type, item.content)
                 for item in result.other_attachments
+            ],
+        )
+
+    @app.post(
+        "/v1/pdf/check",
+        response_model=PdfCheckResponse,
+        responses=error_responses,
+        tags=["PDF"],
+    )
+    async def check_pdf_endpoint(
+        payload: Base64Request, request: Request
+    ) -> PdfCheckResponse:
+        pdf_bytes = decode_base64_strict(
+            payload.content_base64,
+            max_bytes=active_settings.max_pdf_bytes,
+            kind="PDF",
+        )
+        result = check_pdf(pdf_bytes, active_settings)
+        primary_classification = next(
+            (
+                item.classification
+                for item in result.attachments
+                if item.classification is not None
+                and item.classification.syntax is not XmlSyntax.UNKNOWN
+            ),
+            None,
+        )
+        _log_result(
+            request,
+            outcome="success",
+            classification=primary_classification,
+        )
+        return PdfCheckResponse(
+            identifier=_identifier(request),
+            filename=payload.filename,
+            is_pdfa3_or_zugferd_with_xml=result.is_pdfa3_or_zugferd_with_xml,
+            is_pdfa3=result.is_pdfa3,
+            pdfa_part=result.pdfa_part,
+            pdfa_conformance=result.pdfa_conformance,
+            has_xml_attachment=result.has_xml_attachment,
+            is_zugferd=result.is_zugferd,
+            attachments=[
+                PdfAttachmentCheck(
+                    filename=item.filename,
+                    media_type=item.media_type,
+                    attachment_type=item.attachment_type,
+                    association_relationship=item.association_relationship,
+                    size_bytes=item.size_bytes,
+                    sha256=item.sha256,
+                    classification=item.classification,
+                )
+                for item in result.attachments
             ],
         )
 

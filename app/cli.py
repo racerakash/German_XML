@@ -10,6 +10,7 @@ from app.config import Settings
 from app.encoding import sha256_hex
 from app.errors import ServiceError
 from app.invoice_renderer import render_invoice_pdf
+from app.pdf_checker import check_pdf
 from app.service import PdfExtractionResult, process_pdf
 from app.xml_identifier import identify_xml
 
@@ -97,6 +98,11 @@ def build_parser() -> argparse.ArgumentParser:
     extract_parser.add_argument("pdf_file", type=Path)
     extract_parser.add_argument("--output", "-o", type=Path, required=True)
 
+    check_parser = subparsers.add_parser(
+        "check-pdf", help="Check PDF/A-3 metadata, ZUGFeRD XML, and attachments"
+    )
+    check_parser.add_argument("pdf_file", type=Path)
+
     batch_parser = subparsers.add_parser("batch", help="Extract every PDF in a directory")
     batch_parser.add_argument("input_directory", type=Path)
     batch_parser.add_argument("--output", "-o", type=Path, required=True)
@@ -148,6 +154,36 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "extract":
             _process_pdf_file(args.pdf_file, args.output, settings)
+            return 0
+
+        if args.command == "check-pdf":
+            content = args.pdf_file.read_bytes()
+            if len(content) > settings.max_pdf_bytes:
+                raise ServiceError(
+                    "payload_too_large",
+                    "PDF exceeds the configured size limit",
+                    status_code=413,
+                    details={"max_bytes": settings.max_pdf_bytes},
+                )
+            identifier = str(uuid4())
+            result = check_pdf(content, settings)
+            print(
+                f"identifier={identifier} source={args.pdf_file} "
+                f"is_pdfa3_or_zugferd_with_xml={result.is_pdfa3_or_zugferd_with_xml} "
+                f"is_pdfa3={result.is_pdfa3} pdfa_part={result.pdfa_part or '-'} "
+                f"pdfa_conformance={result.pdfa_conformance or '-'} "
+                f"has_xml_attachment={result.has_xml_attachment} "
+                f"is_zugferd={result.is_zugferd}"
+            )
+            for attachment in result.attachments:
+                classification = attachment.classification
+                print(
+                    f"attachment filename={attachment.filename} "
+                    f"type={attachment.attachment_type} media_type={attachment.media_type} "
+                    f"relationship={attachment.association_relationship or '-'} "
+                    f"syntax={classification.syntax.value if classification else '-'} "
+                    f"standard={classification.standard.value if classification else '-'}"
+                )
             return 0
 
         pattern = "**/*.pdf" if args.recursive else "*.pdf"

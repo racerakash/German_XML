@@ -66,6 +66,49 @@ curl -sS http://127.0.0.1:8000/v1/pdf/extract \
   -d "{\"content_base64\":\"$PDF_B64\",\"filename\":\"invoice.pdf\"}"
 ```
 
+### Check PDF/A-3, ZUGFeRD, and attachments
+
+`POST /v1/pdf/check` accepts the same strict-base64 PDF request without extracting attachment content into the response:
+
+```json
+{
+  "content_base64": "JVBERi0xLj...",
+  "filename": "invoice.pdf"
+}
+```
+
+Example response fields:
+
+```json
+{
+  "identifier": "2ee172bb-f2b2-4e34-935b-1ee414228e9d",
+  "filename": "invoice.pdf",
+  "is_pdfa3_or_zugferd_with_xml": true,
+  "is_pdfa3": true,
+  "pdfa_part": "3",
+  "pdfa_conformance": "B",
+  "pdfa_detection": "XMP_METADATA_CLAIM",
+  "has_xml_attachment": true,
+  "is_zugferd": true,
+  "attachments": [
+    {
+      "filename": "factur-x.xml",
+      "media_type": "application/xml",
+      "attachment_type": "CII",
+      "association_relationship": "Alternative",
+      "size_bytes": 1234,
+      "sha256": "...",
+      "classification": {
+        "syntax": "CII",
+        "standard": "ZUGFERD_FACTUR_X"
+      }
+    }
+  ]
+}
+```
+
+Attachment types are `CII`, `UBL`, `XML`, or `OTHER`. The overall boolean is true only when the PDF contains an XML attachment and either declares PDF/A-3 in XMP or contains XML classified as ZUGFeRD/Factur-X. The PDF/A result is an XMP metadata claim check, not full ISO 19005-3 conformance validation; use a dedicated validator such as veraPDF when formal compliance proof is required.
+
 ### Identify XML
 
 `POST /v1/xml/identify` uses the same JSON shape. It returns the UUID, hash, and classification without echoing the XML. Well-formed unrelated XML returns HTTP 200 with `syntax: "UNKNOWN"`; malformed XML returns 422.
@@ -116,6 +159,19 @@ Extract one PDF into a per-PDF output directory:
 
 ```bash
 invoice-extractor extract path/to/invoice.pdf --output output
+```
+
+Check PDF/A-3/ZUGFeRD status and list attachment filenames and types without saving them:
+
+```bash
+invoice-extractor check-pdf path/to/invoice.pdf
+```
+
+Example console output:
+
+```text
+identifier=... source=invoice.pdf is_pdfa3_or_zugferd_with_xml=True is_pdfa3=True pdfa_part=3 pdfa_conformance=B has_xml_attachment=True is_zugferd=True
+attachment filename=factur-x.xml type=CII media_type=application/xml relationship=Alternative syntax=CII standard=ZUGFERD_FACTUR_X
 ```
 
 Process a directory, optionally recursively:

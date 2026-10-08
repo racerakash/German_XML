@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -67,6 +67,29 @@ class XmlRenderPdfResponse(BaseModel):
     identifier: str
     classification: XmlClassification
     pdf: FilePayload
+
+
+class PdfAttachmentCheck(BaseModel):
+    filename: str
+    media_type: str
+    attachment_type: Literal["CII", "UBL", "XML", "OTHER"]
+    association_relationship: str | None = None
+    size_bytes: int
+    sha256: str
+    classification: XmlClassification | None = None
+
+
+class PdfCheckResponse(BaseModel):
+    identifier: str
+    filename: str | None
+    is_pdfa3_or_zugferd_with_xml: bool
+    is_pdfa3: bool
+    pdfa_part: str | None = None
+    pdfa_conformance: str | None = None
+    pdfa_detection: Literal["XMP_METADATA_CLAIM"] = "XMP_METADATA_CLAIM"
+    has_xml_attachment: bool
+    is_zugferd: bool
+    attachments: list[PdfAttachmentCheck]
 
 
 class ErrorBody(BaseModel):

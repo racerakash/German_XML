@@ -5,6 +5,7 @@ from io import BytesIO
 import pytest
 from fastapi.testclient import TestClient
 from pypdf import PdfWriter
+from pypdf.generic import ArrayObject, NameObject
 
 from app.api import create_app
 from app.config import Settings
@@ -131,11 +132,34 @@ def ubl_credit_note_xml() -> bytes:
 
 @pytest.fixture
 def make_pdf():
-    def factory(attachments: list[tuple[str, bytes]], *, encrypt: bool = False) -> bytes:
+    def factory(
+        attachments: list[tuple[str, bytes]],
+        *,
+        encrypt: bool = False,
+        pdfa_part: str | None = None,
+        pdfa_conformance: str = "B",
+        relationships: dict[str, str] | None = None,
+    ) -> bytes:
         writer = PdfWriter()
         writer.add_blank_page(width=200, height=200)
+        associated_files = ArrayObject()
         for filename, content in attachments:
-            writer.add_attachment(filename, content)
+            embedded = writer.add_attachment(filename, content)
+            relationship = (relationships or {}).get(filename)
+            if relationship:
+                embedded.associated_file_relationship = NameObject(f"/{relationship}")
+                associated_files.append(embedded.pdf_object.indirect_reference)
+        if associated_files:
+            writer.root_object[NameObject("/AF")] = associated_files
+        if pdfa_part is not None:
+            writer.xmp_metadata = f"""<?xpacket begin='' id='W5M0MpCehiHzreSzNTczkc9d'?>
+<x:xmpmeta xmlns:x="adobe:ns:meta/">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about="" xmlns:pdfaid="http://www.aiim.org/pdfa/ns/id/"
+    pdfaid:part="{pdfa_part}" pdfaid:conformance="{pdfa_conformance}" />
+ </rdf:RDF>
+</x:xmpmeta>
+<?xpacket end='w'?>""".encode("utf-8")
         if encrypt:
             writer.encrypt("secret")
         output = BytesIO()
